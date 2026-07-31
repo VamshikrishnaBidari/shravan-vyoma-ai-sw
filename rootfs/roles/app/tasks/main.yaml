@@ -1,0 +1,80 @@
+---
+- name: Install onnxruntime-gpu 
+  tags: [always]
+  ansible.builtin.pip:
+    name:
+      - onnxruntime
+      - onnxruntime-gpu
+    extra_args: --index-url=https://pypi.jetson-ai-lab.io/jp6/cu126
+  become: true
+
+- name: Install additional deps
+  tags: [always]
+  ansible.builtin.apt:
+    pkg:
+    - libasound-dev
+    - portaudio19-dev
+    - libportaudio2
+    - ffmpeg
+    - flac
+  become: true
+
+- name: Copy root application code
+  tags: [always]
+  ansible.builtin.synchronize:
+    src: "{{ playbook_dir }}/../python"
+    dest: ~/pocket-infer-sw
+    delete: no
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=venv"
+
+- name: Copy IO Expander Code
+  tags: [demo]
+  ansible.builtin.synchronize:
+    src: "{{ playbook_dir }}/../ioexpander"
+    dest: ~/pocket-infer-sw
+    delete: no
+    rsync_opts:
+      - "--exclude=.git"
+      - "--exclude=venv"
+
+- name: Install global python dependencies
+  tags: [always]
+  ansible.builtin.pip:
+    requirements: /home/ubuntu/pocket-infer-sw/python/requirements.txt
+  become: true
+    
+- name: Install pocketinfer package to system
+  tags: [always]
+  ansible.builtin.pip:
+    name: /home/ubuntu/pocket-infer-sw/python
+    state: present
+    editable: yes
+  become: true
+
+- name: Install remaining pocketinfer deps for default app
+  tags: [always]
+  ansible.builtin.command:
+    cmd: /usr/local/bin/pocketinfer-service --update-app
+
+- name: Install polkit config
+  tags: [always]
+  ansible.builtin.copy:
+    src: manage-units.pkla
+    dest: /etc/polkit-1/localauthority/50-local.d/manage-units.pkla
+  become: true
+
+- name: Enable pinmux on expansion header
+  tags: [always]
+  ansible.builtin.command:
+    cmd: /opt/nvidia/jetson-io/config-by-function.py 1="i2c2 i2c8 spi1 uarta" -o dt
+    creates: /boot/jetson-io-hdr40-user-custom.dtbo
+  become: true
+
+- name: Copy DTB overlay to boot partition
+  tags: [always]
+  ansible.builtin.copy:
+    src: jetson-io-hdr40-user-custom.dtbo
+    dest: /boot/jetson-io-hdr40-user-custom.dtbo
+  become: true
