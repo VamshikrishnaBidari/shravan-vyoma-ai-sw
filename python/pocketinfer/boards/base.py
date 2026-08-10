@@ -89,13 +89,26 @@ class Board:
             camera_name=self.V4L_CAMERA_NAME,
             camera_interface=self.V4L_CAMERA_INTERFACE
         )
-        self.audio = audio.AudioRecorder(devname=self.ALSA_CAPTURE_NAME, rate=self.ALSA_CAPTURE_RATE, frames_per_buffer=4096)
-        self.ALSA_CAPTURE_CARD = audio.find_alsa_card_by_name(self.ALSA_CAPTURE_NAME)
-        self.ALSA_PLAYBACK_CARD = audio.find_alsa_card_by_name(self.ALSA_PLAYBACK_NAME)
+        self.audio = audio.AudioRecorder(
+            devname=self.ALSA_CAPTURE_NAME, 
+            rate=self.ALSA_CAPTURE_RATE, 
+            frames_per_buffer=4096
+        )
+        
+        # Safely resolve ALSA Card Indices
+        self.ALSA_CAPTURE_CARD = audio.find_alsa_card_by_name(self.ALSA_CAPTURE_NAME) or 0
+        self.ALSA_PLAYBACK_CARD = audio.find_alsa_card_by_name(self.ALSA_PLAYBACK_NAME) or 0
         self.ALSA_PLAYBACK_DEVICE = f'hw:{self.ALSA_PLAYBACK_CARD},0'
-        self.logger.debug('Detected ALSA capture card index: %s, Detected ALSA playback card index: %s', self.ALSA_CAPTURE_CARD, self.ALSA_PLAYBACK_CARD)
-        system(f'amixer -c {self.ALSA_CAPTURE_CARD} sset {self.ALSA_CAPTURE_CHANNEL_NAME} 100% > /dev/null')
-        system(f'amixer -c {self.ALSA_PLAYBACK_CARD} sset {self.ALSA_PLAYBACK_CHANNEL_NAME} 100% > /dev/null')
+        
+        self.logger.debug(
+            'Detected ALSA capture card index: %s, Detected ALSA playback card index: %s', 
+            self.ALSA_CAPTURE_CARD, 
+            self.ALSA_PLAYBACK_CARD
+        )
+        
+        # Apply volume settings
+        system(f'amixer -c {self.ALSA_CAPTURE_CARD} sset {self.ALSA_CAPTURE_CHANNEL_NAME} 100% > /dev/null 2>&1')
+        system(f'amixer -c {self.ALSA_PLAYBACK_CARD} sset {self.ALSA_PLAYBACK_CHANNEL_NAME} 100% > /dev/null 2>&1')
         self.ui_cbs = []
 
     def subscribe_to_ui(self, func):

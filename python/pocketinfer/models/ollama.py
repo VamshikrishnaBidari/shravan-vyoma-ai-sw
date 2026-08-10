@@ -13,9 +13,13 @@ class Ollama:
     def chat(self, messages: list) -> ollama.ChatResponse:
         return ollama.chat(model=self.model_name, messages=messages)
 
-    def generate(self, images, prompt):
-        return ollama.generate(model=self.model_name, images=images, prompt=prompt)
-
+    def generate(self, prompt: str, images: list = None):
+            """Generates text from prompt, optionally taking a list of image bytes."""
+            if images:
+                return ollama.generate(model=self.model_name, images=images, prompt=prompt)
+            else:
+                return ollama.generate(model=self.model_name, prompt=prompt)
+    
     def restart(self):
         print(check_output('systemctl restart ollama', shell=True))
         requests.post('http://localhost:11434/api/generate', json={'model': self.model_name, 'keep_alive': -1})

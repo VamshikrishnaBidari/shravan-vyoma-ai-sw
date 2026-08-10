@@ -54,7 +54,7 @@ class AudioRecorder:
         self.frames_per_buffer = frames_per_buffer
         with noalsaerr():
             self.p = pyaudio.PyAudio()
-        self.device_idx = device_idx,
+        self.device_idx = device_idx
         if devname is not None:
             newidx = find_pyaudio_idx_by_name(devname)
             if newidx is not None:
