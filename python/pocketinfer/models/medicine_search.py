@@ -1,8 +1,6 @@
-# python/pocketinfer/models/medicine_search.py
 import sqlite3
 import json
 import os
-import re
 from rapidfuzz import process, fuzz
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
@@ -10,12 +8,12 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 
 class MedicineSearchEngine:
     def __init__(self, master_db_path=None, prescription_db_path=None):
-        self.master_db_path = master_db_path or os.path.join(DATA_DIR, "medicines.db")
+        self.master_db_path = master_db_path or os.path.join(DATA_DIR, "master.db")
         self.prescription_db_path = prescription_db_path or os.path.join(DATA_DIR, "prescription.db")
 
         # Fallbacks for root directory placement
         if not os.path.exists(self.master_db_path):
-            self.master_db_path = os.path.join(BASE_DIR, "medicines.db")
+            self.master_db_path = os.path.join(BASE_DIR, "master.db")
         if not os.path.exists(self.prescription_db_path):
             self.prescription_db_path = os.path.join(BASE_DIR, "prescription.db")
 
@@ -29,107 +27,116 @@ class MedicineSearchEngine:
         for conn in (self.master_conn, self.prescription_conn):
             conn.execute("PRAGMA journal_mode = WAL;")
             conn.execute("PRAGMA synchronous = NORMAL;")
+            conn.execute("PRAGMA cache_size = -64000;")  # 64MB RAM cache
             conn.execute("PRAGMA temp_store = MEMORY;")
-            conn.execute("PRAGMA cache_size = -64000;") # 64MB RAM Cache
 
-    def search_prescription(self, ocr_text):
-        """Fast prescription DB match."""
-        if not ocr_text:
-            return None
+    def search_prescription_db(self, ocr_text):
+        """Tier 1: Checks patient prescriptions matching screenshot 2 schema."""
         cursor = self.prescription_conn.cursor()
-        spaced_text = re.sub(r'[^a-zA-Z0-9]+', ' ', ocr_text).strip()
-        if not spaced_text:
-            return None
+        try:
+            cursor.execute("SELECT * FROM prescription WHERE is_ongoing = 1")
+            prescriptions = cursor.fetchall()
+        except sqlite3.OperationalError:
+            return None, "NOT_FOUND"
 
-        # Search by exact or prefix name match
-        cursor.execute(
-            "SELECT * FROM patient_prescriptions WHERE medicine_name LIKE ? AND is_active = 1 LIMIT 1",
-            (f"{spaced_text}%",)
-        )
-        res = cursor.fetchone()
-        return dict(res) if res else None
+        if not prescriptions:
+            return None, "NOT_FOUND"
 
-    def search_master(self, ocr_text, limit=50):
-        """High-speed multi-stage master database lookup engine (< 15ms)."""
-        if not ocr_text:
-            return None, "NO_MATCH"
+        choices = {row["id"]: row["name"] for row in prescriptions}
+        match = process.extractOne(ocr_text, choices, scorer=fuzz.WRatio, score_cutoff=75)
 
+        if match:
+            matched_id = match[2]
+            cursor.execute("SELECT * FROM prescription WHERE id = ?", (matched_id,))
+            return dict(cursor.fetchone()), "PRESCRIPTION_DB"
+
+        return None, "NOT_FOUND"
+
+    def resolve_substitutes(self, substitute_raw_str, limit=5):
+        """Step 4: B-tree Index lookup for substitute medicine names."""
+        if not substitute_raw_str:
+            return []
+            
+        try:
+            # Parse JSON string array if needed, otherwise parse comma-separated string
+            if substitute_raw_str.strip().startswith("["):
+                sub_names = json.loads(substitute_raw_str)
+            else:
+                sub_names = [s.strip().strip('"') for s in substitute_raw_str.split(",")]
+        except Exception:
+            sub_names = [substitute_raw_str]
+
+        resolved_subs = []
         cursor = self.master_conn.cursor()
+        
+        for sub_name in sub_names[:limit]:
+            clean_sub = sub_name.strip()
+            if not clean_sub:
+                continue
+            # Fast B-Tree exact lookup on master name
+            cursor.execute("SELECT name, composition, uses FROM master WHERE name = ? LIMIT 1", (clean_sub,))
+            match = cursor.fetchone()
+            if match:
+                resolved_subs.append(dict(match))
+            else:
+                resolved_subs.append({"name": clean_sub})
 
-        # 1. Normalize OCR text: Replace non-alphanumeric chars with space
-        spaced_text = re.sub(r'[^a-zA-Z0-9]+', ' ', ocr_text).strip()
-        collapsed_text = re.sub(r'[^a-zA-Z0-9]+', '', ocr_text).strip()
+        return resolved_subs
 
-        if len(spaced_text) < 2 and len(collapsed_text) < 2:
+    def search_master_db(self, ocr_text, limit=25):
+        """Tier 2: 4-Step Master Database Search Engine."""
+        cursor = self.master_conn.cursor()
+        clean_text = "".join(e for e in ocr_text if e.isalnum() or e.isspace()).strip()
+
+        if len(clean_text) < 3:
             return None, "NO_MATCH"
 
-        # Step A: B-Tree Exact / Prefix Match (< 1ms)
-        for term in (spaced_text, collapsed_text):
-            if term:
-                cursor.execute("SELECT * FROM medicines WHERE name LIKE ? LIMIT 1", (f"{term}%",))
-                exact = cursor.fetchone()
-                if exact:
-                    return dict(exact), "MASTER_EXACT"
+        record = None
+        source_type = "NO_MATCH"
 
-        # Step B: FTS5 Trigram Candidate Broadening
-        tokens = [t for t in spaced_text.split() if len(t) >= 2]
-        candidates = []
-
-        if tokens:
-            # Query 1: Wildcard match all tokens (e.g., 'Dolo* 650*')
-            fts_query_all = " ".join(f"{t}*" for t in tokens)
+        # Step 1: B-Tree Exact / Prefix Match on master.name (< 1ms)
+        cursor.execute("SELECT rowid, * FROM master WHERE name LIKE ? LIMIT 1", (f"{clean_text}%",))
+        exact = cursor.fetchone()
+        if exact:
+            record = dict(exact)
+            source_type = "MASTER_EXACT"
+        else:
+            # Step 2: FTS5 Trigram Candidate Narrowing
             try:
                 cursor.execute(
-                    "SELECT rowid, name FROM medicines_fts WHERE medicines_fts MATCH ? LIMIT ?",
-                    (fts_query_all, limit)
+                    "SELECT rowid, name FROM master_fts WHERE master_fts MATCH ? LIMIT ?", 
+                    (f'"{clean_text}"', limit)
                 )
                 candidates = cursor.fetchall()
             except sqlite3.OperationalError:
                 candidates = []
 
-            # Query 2: Fallback to primary alphabetical token if multi-word query produced 0 rows
             if not candidates:
-                alpha_tokens = [t for t in tokens if t.isalpha() and len(t) >= 3]
-                if alpha_tokens:
-                    fts_query_primary = f"{alpha_tokens[0]}*"
-                    try:
-                        cursor.execute(
-                            "SELECT rowid, name FROM medicines_fts WHERE medicines_fts MATCH ? LIMIT ?",
-                            (fts_query_primary, limit)
-                        )
-                        candidates = cursor.fetchall()
-                    except sqlite3.OperationalError:
-                        candidates = []
+                return None, "NO_MATCH"
 
-        if not candidates:
-            return None, "NO_MATCH"
+            # Step 3: RapidFuzz Candidate Ranking on FTS5 Candidates
+            cand_map = {row[0]: row[1] for row in candidates}
+            best = process.extractOne(clean_text, cand_map, scorer=fuzz.WRatio, score_cutoff=60)
 
-        # Step C: RapidFuzz Candidate Ranking
-        cand_map = {row[0]: row[1] for row in candidates}
-        best = process.extractOne(spaced_text, cand_map, scorer=fuzz.WRatio, score_cutoff=55)
+            if not best:
+                return None, "NO_MATCH"
 
-        if not best:
-            return None, "NO_MATCH"
+            matched_rowid = best[2]
+            cursor.execute("SELECT rowid, * FROM master WHERE rowid = ?", (matched_rowid,))
+            matched_row = cursor.fetchone()
+            if matched_row:
+                record = dict(matched_row)
+                source_type = "MASTER_FUZZY"
 
-        # Step D: Fetch Full Row
-        matched_id = best[2]
-        cursor.execute("SELECT * FROM medicines WHERE id = ?", (matched_id,))
-        matched_row = cursor.fetchone()
-        return (dict(matched_row), "MASTER_FUZZY") if matched_row else (None, "NO_MATCH")
+        # Step 4: B-tree lookup for substitute details
+        if record and record.get("substitutes"):
+            record["substitutes_details"] = self.resolve_substitutes(record["substitutes"])
+
+        return record, source_type
 
     def resolve(self, ocr_text):
-        """Unified 2-Tier Matcher: Check active prescriptions first, then Master DB."""
-        if not ocr_text:
-            return None, "NO_MATCH"
-
-        # Tier 1: Patient Prescription Database
-        presc_record = self.search_prescription(ocr_text)
-        if presc_record:
-            return presc_record, "PRESCRIPTION_DB"
-
-        # Tier 2: Master Medicines Database
-        master_record, source = self.search_master(ocr_text)
-        if master_record:
-            return master_record, source
-
-        return None, "NO_MATCH"
+        """Unified 2-Tier Matcher."""
+        res, source = self.search_prescription_db(ocr_text)
+        if res:
+            return res, source
+        return self.search_master_db(ocr_text)

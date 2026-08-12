@@ -26,7 +26,7 @@ RULES:
     "version": "1.0.0",
     "models": {
         "ollama": {"model_name": "qwen3-vl:2b"},
-        "piper": {"voice_name": "en_US-lessac-medium"},
+        "piper": {"voice_name": "en_US-lessac-high"},
         "vosk": {"model_name": "vosk-model-small-en-us-0.15"},
     },
     "service_dependencies": ["ollama"],

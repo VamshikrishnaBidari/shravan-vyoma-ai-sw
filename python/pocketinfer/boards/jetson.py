@@ -14,8 +14,8 @@ import xpt2046_circuitpython as xpt2046
 
 
 class PocketInferDevboard(Board):
-    V4L_CAMERA_NAME = 'Arducam_8mp'
-    ALSA_CAPTURE_NAME = 'Arducam_8mp'
+    V4L_CAMERA_NAME = 'C270'
+    ALSA_CAPTURE_NAME = 'C270 HD WEBCAM'
     ALSA_PLAYBACK_NAME = 'USB Audio Device'
     TRIGGER_BOARD_IDX = 'GP167'  # Physical pin 7 on header
 
