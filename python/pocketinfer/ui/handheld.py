@@ -23,6 +23,8 @@ class HandheldUI:
     '''
     ICON_FONT = bitmap_font.load_font(str(files('pocketinfer.ui').joinpath('forkawesome-16.pcf')))
     HINDI_FONT = bitmap_font.load_font(str(files('pocketinfer.ui').joinpath('NotoSansDevanagari-Regular-12.pcf')))
+    TITLE_FONT = bitmap_font.load_font(str(files('pocketinfer.ui').joinpath('Poppins-SemiBold-40.pcf')))
+    SUBTITLE_FONT = bitmap_font.load_font(str(files('pocketinfer.ui').joinpath('Poppins-SemiBold-14.pcf')))
 
     def __init__(self, display, touch, logger=None):
         ''' Load the UI into memory'''
@@ -39,18 +41,24 @@ class HandheldUI:
         self.appui = displayio.Group()
         self.display.root_group = self.layers
 
-        color_bitmap = displayio.Bitmap(320, 240, 1)
-        color_palette = displayio.Palette(1)
-        color_palette[0] = 0x000000
+        # Create a 1x1 bitmap and stretch it to fill the 320x240 screen
+        color_bitmap = displayio.Bitmap(1, 1, 1)
+        self.bg_palette = displayio.Palette(1)
+        
+        # 0xFFFFFF renders as pure black on the inverted screen
+        self.bg_palette[0] = 0xFFFFFF 
 
-        # bg_sprite = displayio.TileGrid(color_bitmap,
-        #                             pixel_shader=color_palette,
-        #                             x=0, y=0)
-
+        bg_sprite = displayio.TileGrid(color_bitmap,
+                                    pixel_shader=self.bg_palette,
+                                    width=320, height=240)
         # Set text, font, and color
         font = terminalio.FONT
-        color = 0xFFFFFF
-        color_dim = 0x777777
+        
+        # 0x000000 renders as bright white on the inverted screen
+        color = 0x000000      
+        
+        # 0x666666 renders as a clean soft gray
+        color_dim = 0x666666
 
         # Create the text label
         self.statusbar = label.Label(font, text=" "*52, color=color_dim)
@@ -58,7 +66,6 @@ class HandheldUI:
         self.statusbar.anchored_position = (160, 240)
         self.statusbar.text = "Initializing..."
         self.topbar.append(self.statusbar)
-
 
         self.modeval = label.Label(font, text=" "*52, color=color_dim)
         self.modeval.anchor_point = (0.0, 0.0)
@@ -69,33 +76,37 @@ class HandheldUI:
         def _toggle_setpage(name):
             self.buttons[name].selected = False # leave button deselected
             if self.setpage.hidden:
+                # Opening settings: Hide everything else
                 self.setpage.hidden = False
                 self.appui.hidden = True
+                self.homeui.hidden = True 
             else:
+                # Closing settings: Return to the Home screen instead of a blank screen
                 self.setpage.hidden = True
-                self.appui.hidden = False
+                self.show_home_ui(True)
 
+        def _toggle_home(name):
+            self.buttons[name].selected = False # leave button deselected
+            # Always force the Home screen to show (prevents toggling it off by accident)
+            self.show_home_ui(True)
+            self.setpage.hidden = True
+
+        # 1. The Home Button (White icon on black background, highlight inversion on touch)
         self.topbar.append(self._button('Home', x=320-28, y=0, width=28, height=28, label=icons.home, font=self.ICON_FONT,
-                                        label_color=color, fill_color=0x000000, outline_color=0x000000))
+                                        label_color=0x000000, fill_color=0xFFFFFF, outline_color=0xFFFFFF,
+                                        selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF,
+                                        cb=_toggle_home))
+
+        # 2. The Settings Button (White icon on black background, highlight inversion on touch)
         self.topbar.append(self._button('Settings', x=320-28*2, y=0, width=28, height=28, label=icons.book, font=self.ICON_FONT,
-                                        label_color=color, fill_color=0x000000, outline_color=0x000000, cb=_toggle_setpage))
-
-        # Create the text label
-        self.battval = label.Label(self.ICON_FONT, text=f"{icons.microchip}     {icons.battery_full}", color=color)
-        self.battval.anchor_point = (1.0, 0.0)
-        self.battval.anchored_position = (320-28*2-4, 3)
-        self.topbar.append(self.battval)
-
-        self.memval = label.Label(self.HINDI_FONT, text="    ", color=color)
-        self.memval.anchor_point = (1.0, 0.0)
-        self.memval.anchored_position = (320-28*4-4, 8)
-        self.topbar.append(self.memval)
+                                        label_color=0x000000, fill_color=0xFFFFFF, outline_color=0xFFFFFF,
+                                        selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF,
+                                        cb=_toggle_setpage))
 
         self.toptext = text_box.TextBox(x=0, y=0, width=320, height=100, line_spacing=0.80, font=self.HINDI_FONT, color=color)
         self.toptext.anchor_point = (0.0, 0.0)
         self.toptext.anchored_position = (0, 16)
         self.appui.append(self.toptext)
-
 
         self.bottomtext = text_box.TextBox(x=0, y=100, width=320, height=100, line_spacing=0.8, font=self.HINDI_FONT, color=color)
         self.bottomtext.anchor_point = (0.0, 0.0)
@@ -145,10 +156,90 @@ class HandheldUI:
         self.setpage.append(self._button('Reboot', x=64*3, y=192, cb=_close_setpage))
 
         self.setpage.hidden = True
-        # self.layers.append(bg_sprite)
+
+        self.homeui = displayio.Group()
+        
+        self.homeui.append(self._button(
+            'Launch HearTheWorld', x=20, y=30, width=280, height=40,
+            label="Hear the World", font=self.HINDI_FONT,
+            label_color=0x000000, fill_color=0xDDDDDD, outline_color=0x888888,
+            selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF
+        ))
+        
+        self.homeui.append(self._button(
+            'Launch Medical', x=20, y=80, width=280, height=40,
+            label="Medicine Assistant", font=self.HINDI_FONT,
+            label_color=0x000000, fill_color=0xDDDDDD, outline_color=0x888888,
+            selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF
+        ))
+
+        # Add Prescription Button
+        self.homeui.append(self._button(
+            'Add Prescription', x=20, y=130, width=280, height=40,
+            label="Add Prescription", font=self.HINDI_FONT,
+            label_color=0x000000, fill_color=0xDDDDDD, outline_color=0x888888,
+            selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF
+        ))
+
+        # Add Reminder Button
+        self.homeui.append(self._button(
+            'Add Reminder', x=20, y=180, width=280, height=40,
+            label="Add Reminder", font=self.HINDI_FONT,
+            label_color=0x000000, fill_color=0xDDDDDD, outline_color=0x888888,
+            selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF
+        ))
+        
+        self.homeui.hidden = True
+
+        self.splashui = displayio.Group()
+
+        splash_bitmap = displayio.Bitmap(1, 1, 1)
+        self.splash_palette = displayio.Palette(1)
+        self.splash_palette[0] = 0xE4E0B4   # inverted navy — renders as navy on this panel
+        splash_bg = displayio.TileGrid(splash_bitmap, pixel_shader=self.splash_palette, width=320, height=240)
+        self.splashui.append(splash_bg)
+
+        title_label = label.Label(self.TITLE_FONT, text="SHRAVAN", color=0x000000)  # inverted white — renders white
+        title_label.anchor_point = (0.5, 0.5)
+        title_label.anchored_position = (160, 100)
+        self.splashui.append(title_label)
+
+        subtitle_label = label.Label(self.SUBTITLE_FONT, text="Care Beyond Connectivity", color=0x000000)  # inverted white
+        subtitle_label.anchor_point = (0.5, 0.5)
+        subtitle_label.anchored_position = (160, 140)
+        self.splashui.append(subtitle_label)
+
+        self.splashui.hidden = True
+
+        self.reminderui = displayio.Group()
+
+        rem_bg_bitmap = displayio.Bitmap(1, 1, 1)
+        rem_bg_palette = displayio.Palette(1)
+        rem_bg_palette[0] = 0xFFFFFF 
+        rem_bg_sprite = displayio.TileGrid(rem_bg_bitmap, pixel_shader=rem_bg_palette, width=320, height=240)
+        self.reminderui.append(rem_bg_sprite)
+
+        # Title Label (Subtitle font, left-aligned)
+        self.reminder_title = label.Label(self.SUBTITLE_FONT, text="", color=0x000000) # 0x000000 = white on inverted screen
+        self.reminder_title.anchor_point = (0.0, 0.0)
+        self.reminder_title.anchored_position = (20, 80)
+        self.reminderui.append(self.reminder_title)
+
+        # Subtitle Label (Subtitle font, left-aligned)
+        self.reminder_sub = label.Label(self.SUBTITLE_FONT, text="", color=0x000000)
+        self.reminder_sub.anchor_point = (0.0, 0.0)
+        self.reminder_sub.anchored_position = (20, 120)
+        self.reminderui.append(self.reminder_sub)
+
+        self.reminderui.hidden = True
+
+        self.layers.append(bg_sprite)
         self.layers.append(self.topbar)
         self.layers.append(self.appui)
+        self.layers.append(self.homeui)
+        self.layers.append(self.splashui)
         self.layers.append(self.setpage)
+        self.layers.append(self.reminderui)
 
     def get_button_names(self):
         ''' Return a list of all button names in the UI '''
@@ -159,7 +250,9 @@ class HandheldUI:
         return {name: self.buttons[name].selected for name in self.buttons.keys()}
 
     def _button(self, name, x, y, label=None, font=None, width=64, height=32,
-                label_color=0xFF7E00, fill_color=0x5C5B5C, outline_color=0x767676, cb=None, selected=False):
+                label_color=0x000000, fill_color=0xDDDDDD, outline_color=0x888888, 
+                selected_fill=0x000000, selected_outline=0x000000, selected_label=0xFFFFFF,
+                cb=None, selected=False):
         ''' Create a button and add it to the button list. If a callback is provided, it will be called when the button is pressed.
         Note that the button object returned should be added to the correct Group for it to be displayed'''
         if font is None:
@@ -176,6 +269,9 @@ class HandheldUI:
             label_color=label_color,
             fill_color=fill_color,
             outline_color=outline_color,
+            selected_fill=selected_fill,
+            selected_outline=selected_outline,
+            selected_label=selected_label
         )
         button.selected = selected
         self.buttons[name] = button
@@ -208,7 +304,72 @@ class HandheldUI:
         self.bottomtext.text = ""
         self.statusbar.text = ""
         self.modeval.text = ""
-        self.memval.text = ""
+
+    def set_background_color(self, color: str):
+        ''' Changes the background color and adjusts text colors for contrast. '''
+        if color == "white":
+            # On inverted screen, 0x000000 renders as white
+            self.bg_palette[0] = 0x000000
+            
+            # Text to black (0xFFFFFF on inverted screen)
+            self.toptext.color = 0xFFFFFF
+            self.bottomtext.color = 0xFFFFFF
+            self.statusbar.color = 0xFFFFFF
+            self.modeval.color = 0xFFFFFF
+        else:
+            # Default: 0xFFFFFF renders as black on inverted screen
+            self.bg_palette[0] = 0xFFFFFF
+            
+            # Text to white (0x000000) and soft gray (0x666666)
+            self.toptext.color = 0x000000
+            self.bottomtext.color = 0x000000
+            self.statusbar.color = 0x666666
+            self.modeval.color = 0x666666
+            
+        self.force_refresh()
+
+    def show_splash_ui(self, show: bool):
+        ''' Shows the SHRAVAN splash screen with nothing else on screen (topbar hidden too). '''
+        self.splashui.hidden = not show
+        if show:
+            self.topbar.hidden = True
+            self.appui.hidden = True
+            self.homeui.hidden = True
+            self.setpage.hidden = True
+
+    def show_reminder_ui(self, title: str, subtitle: str = ""):
+        """Displays full-screen reminder card with left-aligned typography."""
+        self.reminder_title.text = title
+        self.reminder_sub.text = subtitle
+        
+        # Hide all other layers including topbar and splash to prevent text overlap
+        self.topbar.hidden = True
+        self.appui.hidden = True
+        self.homeui.hidden = True
+        self.splashui.hidden = True
+        self.setpage.hidden = True
+        self.reminderui.hidden = False
+
+        self.force_refresh()
+
+    def hide_reminder_ui(self):
+        """Hides reminder card and restores topbar."""
+        self.reminderui.hidden = True
+        self.topbar.hidden = False
+        self.appui.hidden = False
+
+    def show_home_ui(self, show: bool):
+        self.splashui.hidden = True
+        self.reminderui.hidden = True
+        self.topbar.hidden = False
+        self.homeui.hidden = not show
+        self.appui.hidden = show
+
+        if show:
+            home_buttons = ['Launch HearTheWorld', 'Launch Medical', 'Add Prescription', 'Add Reminder']
+            for btn_name in home_buttons:
+                if btn_name in self.buttons:
+                    self.buttons[btn_name].selected = False
 
     def force_refresh(self):
         self.display.root_group = None
@@ -247,16 +408,11 @@ class HandheldUI:
                 self._dispatch_button_cb(name)
 
     def check_touch(self):
-        # TODO - this is specific to the xpt2046 controller and involves SPI internals, should be made generic or moved out
-        # It's possible this method was called while the display is in in the process of a refresh and is using the SPI bus
-        # IF that's the case, the touch read will fail and throw an exception, which we catch and ignore. This is not ideal, but it works for now.
         import xpt2046_circuitpython as xpt2046
         try:
             if self.touch.is_pressed():
                     args = self.touch.get_coordinates()
                     if args is not None:
-                        # NOTE, this implies 90 degree rotation on the display
-                        # TODO - make this more robust to different rotations and touch coordinate mappings
                         y, x = args
                         y = 240 - y
                         print(f"Touch at ({x}, {y})")
@@ -279,9 +435,8 @@ class ILI9341UIConfig(NamedTuple):
     rotation: int = 90  # Rotation of the display in degrees
 
 class UIRPCCall:
-    ''' This class is used to send a function call from one process to another, and receive the result. It is used to allow the main application process to call functions in the UI process, and receive the result. '''
+    ''' This class is used to send a function call from one process to another, and receive the result. '''
     def __init__(self, func_name, *args):
-        ''' Initialize the UIRPCCall with the function name and arguments. The function name must be a string, and the arguments must be serializable. '''
         self.func_name = func_name
         self.args = args
         self.executed = False
@@ -290,8 +445,6 @@ class UIRPCCall:
         self._id = uuid.uuid4()
     
     def send(self, rpc_pipe: multiprocessing.connection.Connection):
-        ''' Send this request to the other process via the provided pipe, and wait for the result. If the function raises an exception, it will be re-raised in this process.
-         If the function returns a value, it will be returned to this process. '''
         rpc_pipe.send(self)
         ret = rpc_pipe.recv()
         if ret._id != self._id:
@@ -301,7 +454,6 @@ class UIRPCCall:
         return ret.result
     
     def execute(self, func, rpc_pipe: multiprocessing.connection.Connection):
-        ''' Execute the function in the other process, and send the result back via the provided pipe. If an exception is raised, it will be sent back to the calling process. '''
         if callable(func):
             try:
                 self.result = func(*self.args)
@@ -331,15 +483,12 @@ class IlI9341HandheldUI(HandheldUI):
         tft_dc = board.pin.Pin(ui_config.dc_pin)
 
         self.logger.debug('Starting SPI and reset')
-        # Setup SPI bus using hardware SPI:
         spi = board.SPI()
-        # RESET pin for display
         reset_pin.direction = digitalio.Direction.OUTPUT
         reset_pin.value = False
         time.sleep(0.005)
         reset_pin.value = True
         time.sleep(0.005)
-        # Turn on the display backlight
         pwm_pin.direction = digitalio.Direction.OUTPUT
         pwm_pin.value = True
 
@@ -355,9 +504,6 @@ class IlI9341HandheldUI(HandheldUI):
     
     @classmethod
     def multiprocess_launch(cls, ui_config: ILI9341UIConfig, rpc_pipe: multiprocessing.connection.Connection, button_queue: multiprocessing.Queue):
-        ''' Instantiate a new UI object and continuously check for touch events and requests from a remote process
-        This is designed to be run via multiprocessing.Process, and will block until the process is terminated.
-        The rpc_pipe is used to receive requests from the main application process, and the button_queue is used to send button press events back to the main application process.  '''
         def button_cb(name):
             button_queue.put(name)
         UI = cls(ui_config)
@@ -376,8 +522,6 @@ class IlI9341HandheldUI(HandheldUI):
     
     @classmethod
     def get_remote(cls, rpc_pipe: multiprocessing.connection.Connection):
-        ''' Return a proxy object that can be used to call functions in the UI process via the provided pipe.
-    The proxy object will have the same methods as the UI class, and will send requests to the UI process and wait for the result.  '''
         class RemoteUI:
             def __init__(self, rpc_pipe):
                 self.rpc_pipe = rpc_pipe
@@ -397,29 +541,22 @@ if __name__ == "__main__":
     import adafruit_ili9341
     import xpt2046_circuitpython as xpt2046
 
-
     reset_pin = digitalio.DigitalInOut(board.pin.Pin("GP36_SPI3_CLK"))
     pwm_pin = digitalio.DigitalInOut(board.D18)
     cs_pin = digitalio.DigitalInOut(board.D8)
     dc_pin = digitalio.DigitalInOut(board.D22)
-    #reset_pin = digitalio.DigitalInOut(board.D13)
     tft_cs = board.D8
     tft_dc = board.D22
     touch_cs = board.D7
     touch_irq = board.D25
 
-    # Config for display baudrate (default max is 24mhz):
     BAUDRATE = 240000
 
-    # Setup SPI bus using hardware SPI:
     i2c = board.I2C()
     spi = board.SPI()
-    # Turn on the display backlight
     pwm_pin.direction = digitalio.Direction.OUTPUT
     pwm_pin.value = True
 
-    # disp = ili9341.ILI9341(spi, rotation=180, width=320, height=240,                           # 2.2", 2.4", 2.8", 3.2" ILI9341
-    #                        cs=cs_pin, dc=dc_pin, rst=reset_pin, baudrate=BAUDRATE)
     displayio.release_displays()
     display_bus = fourwire.FourWire(spi, command=tft_dc, chip_select=tft_cs, baudrate=50000000)
     display = adafruit_ili9341.ILI9341(display_bus, width=320, height=240, rotation=90)

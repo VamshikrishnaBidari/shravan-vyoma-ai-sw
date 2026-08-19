@@ -8,6 +8,8 @@ import json
 from pocketinfer.applications import *
 from pocketinfer.applications.registry import ApplicationRegistry
 from pocketinfer.boards.base import Board, DummyBoard
+from pocketinfer.orchestrator import Orchestrator
+from pocketinfer.reminders import ReminderMonitor
 from psutil import virtual_memory
 
 
@@ -19,7 +21,7 @@ def _update_stats(board):
 def main():
     parser = argparse.ArgumentParser(description="PocketInfer Application Runner")
     parser.add_argument('--log-level', type=str, default='INFO', help='Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)')
-    parser.add_argument('--app', type=str, default="HearTheWorld", help='Name of the application to run')
+    parser.add_argument('--app', type=str, default=None, help='Name of the application to run')
     parser.add_argument('--list-apps', action='store_true', help='List available applications and exit')
     parser.add_argument('--update-app', action='store_true', default=False, help='Install dependencies for the specified application and exit')
     parser.add_argument('--dummy-board', action='store_true', default=False, help='Do not use hardware features - load audio and image from file')
@@ -37,12 +39,12 @@ def main():
         for name in ApplicationRegistry._classes.keys():
             print(f"  {name}")
         sys.exit(0)
-    app_cls = ApplicationRegistry.get_application(args.app)
-    if app_cls is None: 
-        logging.error("Application not found")
-        sys.exit(1)
 
-    if args.update_app:
+    if args.app and args.update_app:
+        app_cls = ApplicationRegistry.get_application(args.app)
+        if app_cls is None: 
+            logging.error("Application not found")
+            sys.exit(1)
         app_cls.update_dependencies()
         sys.exit(0)
 
@@ -66,22 +68,50 @@ def main():
         board = Board.get_board()
     else:
         board = DummyBoard(vars(args))
+
     threading.Thread(target=_update_stats, args=(board,), daemon=True).start()
-    board.statusbar("Starting: {}...".format(args.app))
     board.button_led(False)
 
-    app_cls.verify_dependencies()
-    logging.info(f"Starting application: {args.app}")
-    board.mode_text(f"App {args.app}")
-    app = app_cls(board, settings=settings)
-    app.start()
-    if args.dummy_board:
-        # Only run application once
-        app.running = False
-    while app.running:
-        time.sleep(1.0)
-    app.stop()
-    sys.exit(0)
+    orchestrator = Orchestrator(board)
+    reminder_monitor = ReminderMonitor(board, orchestrator)
+    reminder_monitor.start()
+
+    APP_BUTTON_MAP = {
+        'Launch HearTheWorld': 'HearTheWorld',
+        'Launch Medical': 'MedicalAssistant',  
+        'Add Prescription': 'PrescriptionAssistant'
+    }
+
+    def _on_ui_event(name):
+        if orchestrator.is_busy():
+            return
+        app_name = APP_BUTTON_MAP.get(name)
+        if app_name:
+            orchestrator.launch(app_name, settings=settings)
+
+    board.subscribe_to_ui(_on_ui_event)
+
+    home_button = getattr(board, 'HOME_BUTTON', None)
+    if home_button:
+        def _on_home(pressed):
+            if pressed:
+                orchestrator.go_home()
+        board.register_gpio_callback(home_button, _on_home)
+
+    if args.app and args.app != "HearTheWorld":
+        orchestrator.launch(args.app, settings=settings)
+        if args.dummy_board:
+            orchestrator.current_app.running = False
+    else:
+        orchestrator.show_splash_screen()
+
+    try:
+        while True:
+            time.sleep(1.0)
+    except KeyboardInterrupt:
+        if orchestrator.is_busy():
+            orchestrator.go_home()
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()

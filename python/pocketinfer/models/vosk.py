@@ -20,7 +20,7 @@ class Vosk:
         self.model_name = model_name
         self.model_path = os.path.join(self.MODEL_DIR, model_name)
 
-    def recognize(self, audio_data: AudioData, verbose: bool = False) -> str:
+    def recognize(self, audio_data: AudioData, verbose: bool = False, grammar: list[str] | None = None) -> str:
         if not os.path.exists(self.model_path):
             raise RuntimeError(
                 f"Vosk model not found at {self.model_path}. "
@@ -29,7 +29,12 @@ class Vosk:
 
         self.logger.debug(f"Recognizing audio data with Vosk model {self.model_name}")
         SAMPLE_RATE = 16_000
-        rec = KaldiRecognizer(Model(self.model_path), SAMPLE_RATE)
+
+        if grammar:
+            grammar_json = json.dumps(grammar + ["[unk]"])
+            rec = KaldiRecognizer(Model(self.model_path), SAMPLE_RATE, grammar_json)
+        else:
+            rec = KaldiRecognizer(Model(self.model_path), SAMPLE_RATE)
 
         rec.AcceptWaveform(
             audio_data.get_raw_data(convert_rate=SAMPLE_RATE, convert_width=2)

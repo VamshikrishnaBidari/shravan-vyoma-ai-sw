@@ -13,12 +13,17 @@ class Ollama:
     def chat(self, messages: list) -> ollama.ChatResponse:
         return ollama.chat(model=self.model_name, messages=messages)
 
-    def generate(self, prompt: str, images: list = None):
-            """Generates text from prompt, optionally taking a list of image bytes."""
-            if images:
-                return ollama.generate(model=self.model_name, images=images, prompt=prompt)
-            else:
-                return ollama.generate(model=self.model_name, prompt=prompt)
+    def generate(self, prompt: str, images: list = None, format: str = None, options: dict = None, think: bool = None):
+        kwargs = {"model": self.model_name, "prompt": prompt}
+        if images:
+            kwargs["images"] = images
+        if format:
+            kwargs["format"] = format
+        if options:
+            kwargs["options"] = options
+        if think is not None:
+            kwargs["think"] = think
+        return ollama.generate(**kwargs)
     
     def restart(self):
         print(check_output('systemctl restart ollama', shell=True))
